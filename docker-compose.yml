@@ -3,6 +3,10 @@ services:
     image: clickhouse/clickhouse-server:24.8
     ports:
       - "8123:8123"
+    environment:
+      CLICKHOUSE_DB: fairq
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: fairq
     volumes:
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - clickhouse-data:/var/lib/clickhouse
@@ -18,6 +22,7 @@ services:
       - "8000:8000"
     environment:
       CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PASSWORD: fairq
     depends_on:
       clickhouse:
         condition: service_healthy

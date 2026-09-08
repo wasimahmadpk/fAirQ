@@ -4,31 +4,31 @@ Hourly **NO₂, PM10, and PM2.5** forecasts for Berlin, four days ahead.
 
 Stack: Python, XGBoost, ClickHouse, Docker, Kubernetes jobs, FastAPI.
 
-## What works now (step 1)
+## What works now
 
-Local stack only: ClickHouse + a FastAPI `/health` endpoint.
+ClickHouse + FastAPI `/health`, plus an ingest job that fills the tables.
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 curl http://localhost:8000/health
+docker compose run --rm api python -m fairq.ingest
 ```
 
-Tables created on first boot: `measurements`, `weather`, `forecasts`, `model_versions`.
-
-The model and database stay in Docker. A public host (Railway / Render / Fly) comes after the pipeline runs locally.
+Ingest pulls the last month of hourly **NO₂, PM10, PM2.5** from three Berlin stations (Frankfurter Allee, Neukölln, Grunewald) and matching DWD weather via Bright Sky.
 
 ## Next
 
-2. Ingest BLUME stations + Bright Sky (DWD) weather  
 3. Features + XGBoost train/score  
 4. `/forecast` API  
 5. Validation, monitoring, CI, Kubernetes CronJob YAML  
-6. Later: causal `/simulate` (traffic effect). Not in this step.
+6. Later: causal `/simulate` (traffic effect)
 
 ## Layout
 
 ```
-src/fairq/api.py    FastAPI
-sql/init.sql        ClickHouse schema
-docker-compose.yml  ClickHouse + API
+src/fairq/api.py      FastAPI
+src/fairq/ingest.py   BLUME + weather download
+src/fairq/db.py       ClickHouse client
+sql/init.sql          schema
+docker-compose.yml    ClickHouse + API
 ```
