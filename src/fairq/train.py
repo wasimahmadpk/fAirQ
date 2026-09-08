@@ -32,6 +32,7 @@ def run() -> None:
         )
         preds = model.predict(test[FEATURE_COLS])
         mae = float((test["value"] - preds).abs().mean())
+        persist_mae = float((test["value"] - test["lag_1"]).abs().mean())
         path = os.path.join(MODELS_DIR, f"{pollutant}.txt")
         model.save_model(path)
         db.insert(
@@ -40,11 +41,14 @@ def run() -> None:
                 version,
                 pollutant,
                 datetime.now(timezone.utc).replace(tzinfo=None),
-                json.dumps({"mae": round(mae, 3)}),
+                json.dumps({"mae": round(mae, 3), "persist_mae": round(persist_mae, 3)}),
             ]],
             column_names=["model_version", "pollutant", "trained_at", "metrics"],
         )
-        print(f"{pollutant} test MAE {mae:.2f}  n_train={len(train)} n_test={len(test)}")
+        print(
+            f"{pollutant}  LightGBM {mae:.2f}  persist {persist_mae:.2f}  "
+            f"n_train={len(train)} n_test={len(test)}"
+        )
     print(f"model_version {version}")
 
 
