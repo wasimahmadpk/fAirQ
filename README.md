@@ -1,10 +1,8 @@
 # fAirQ
 
-Mini clone of INWT’s **FAirQ** Berlin air-quality forecast — for an MLOps interview, not a product.
+Hourly **NO₂, PM10, and PM2.5** forecasts for Berlin, four days ahead.
 
-This repo is standalone. It has nothing to do with TraceDefect / vcare.
-
-FAirQ (INWT’s name for the model; they do not publish a long form) forecasts hourly **NO₂, PM10, PM2.5** for Berlin, four days ahead. Their stack: Python, XGBoost, ClickHouse, Docker, Kubernetes jobs, FastAPI.
+Stack: Python, XGBoost, ClickHouse, Docker, Kubernetes jobs, FastAPI.
 
 ## What works now (step 1)
 
@@ -17,7 +15,7 @@ curl http://localhost:8000/health
 
 Tables created on first boot: `measurements`, `weather`, `forecasts`, `model_versions`.
 
-Not on Vercel. The model and database stay in Docker. A public host (Railway / Render / Fly) comes after the pipeline runs locally.
+The model and database stay in Docker. A public host (Railway / Render / Fly) comes after the pipeline runs locally.
 
 ## Next
 
