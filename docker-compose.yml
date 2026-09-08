@@ -23,9 +23,13 @@ services:
     environment:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PASSWORD: fairq
+      MODELS_DIR: /app/models
+    volumes:
+      - models-data:/app/models
     depends_on:
       clickhouse:
         condition: service_healthy
 
 volumes:
   clickhouse-data:
+  models-data:
