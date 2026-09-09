@@ -84,11 +84,14 @@ def run() -> None:
             for h, (g, p) in scores.items():
                 horizon_gbm[h].append(g)
                 horizon_persist[h].append(p)
+        stored = {"mae_1h": round(mae, 3), "persist_1h": round(persist_mae, 3)}
         for h in HORIZONS:
             if not horizon_gbm[h]:
                 continue
             g = sum(horizon_gbm[h]) / len(horizon_gbm[h])
             p = sum(horizon_persist[h]) / len(horizon_persist[h])
+            stored[f"gbm_{h}h"] = round(g, 3)
+            stored[f"persist_{h}h"] = round(p, 3)
             print(f"{pollutant}  {h:>3}h-ahead        LightGBM {g:.2f}  persist {p:.2f}")
 
         db.insert(
@@ -97,7 +100,7 @@ def run() -> None:
                 version,
                 pollutant,
                 datetime.now(timezone.utc).replace(tzinfo=None),
-                json.dumps({"mae_1h": round(mae, 3), "persist_1h": round(persist_mae, 3)}),
+                json.dumps(stored),
             ]],
             column_names=["model_version", "pollutant", "trained_at", "metrics"],
         )
