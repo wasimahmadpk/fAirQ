@@ -52,6 +52,7 @@ def run() -> None:
     cutoff = frame["observed_at"].max() - pd.Timedelta(TEST_DAYS, unit="D")
     os.makedirs(MODELS_DIR, exist_ok=True)
     db = connect()
+    db.command("TRUNCATE TABLE model_versions")
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")
 
     for pollutant, part in frame.groupby("pollutant"):
