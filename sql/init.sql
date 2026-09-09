@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS fairq.weather
     temperature_c Float64,
     wind_speed_ms Float64,
     wind_direction_deg Float64,
-    precipitation_mm Float64
+    precipitation_mm Float64,
+    relative_humidity Float64
 )
 ENGINE = MergeTree
 ORDER BY observed_at;
@@ -42,3 +43,13 @@ CREATE TABLE IF NOT EXISTS fairq.model_versions
 )
 ENGINE = MergeTree
 ORDER BY (pollutant, trained_at);
+
+CREATE TABLE IF NOT EXISTS fairq.pipeline_runs
+(
+    ran_at DateTime,
+    job String,
+    ok UInt8,
+    detail String
+)
+ENGINE = MergeTree
+ORDER BY (job, ran_at);

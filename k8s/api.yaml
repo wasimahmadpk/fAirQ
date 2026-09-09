@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fairq
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fairq-api
+  namespace: fairq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fairq-api
+  template:
+    metadata:
+      labels:
+        app: fairq-api
+    spec:
+      containers:
+        - name: api
+          image: fairq:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: fairq
+            - secretRef:
+                name: fairq
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: fairq-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fairq-api
+  namespace: fairq
+spec:
+  selector:
+    app: fairq-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fairq-models
+  namespace: fairq
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

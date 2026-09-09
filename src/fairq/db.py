@@ -8,10 +8,20 @@ CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "fairq")
 
 
 def connect():
-    return clickhouse_connect.get_client(
+    client = clickhouse_connect.get_client(
         host=CLICKHOUSE_HOST,
         port=CLICKHOUSE_PORT,
         username="default",
         password=CLICKHOUSE_PASSWORD,
         database="fairq",
     )
+    client.command(
+        "ALTER TABLE fairq.weather "
+        "ADD COLUMN IF NOT EXISTS relative_humidity Float64 DEFAULT 0"
+    )
+    client.command(
+        "CREATE TABLE IF NOT EXISTS fairq.pipeline_runs "
+        "(ran_at DateTime, job String, ok UInt8, detail String) "
+        "ENGINE = MergeTree ORDER BY (job, ran_at)"
+    )
+    return client

@@ -106,6 +106,9 @@ def fetch_weather(client: httpx.Client, start: date, stop: date) -> list[tuple]:
                 float(wind_kmh) / 3.6 if wind_kmh is not None else 0.0,
                 float(item.get("wind_direction") or 0.0),
                 float(item.get("precipitation") or 0.0),
+                float(item["relative_humidity"])
+                if item.get("relative_humidity") is not None
+                else 70.0,
             )
         sleep(0.15)
     if not rows:
@@ -136,6 +139,7 @@ def run() -> None:
             "wind_speed_ms",
             "wind_direction_deg",
             "precipitation_mm",
+            "relative_humidity",
         ],
     )
     print(f"measurements {len(measurements)}")

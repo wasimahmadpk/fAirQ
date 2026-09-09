@@ -1,0 +1,148 @@
+# Same image as the API. Jobs write ClickHouse; train also writes /app/models.
+# Apply after config.yaml and api.yaml. Point CLICKHOUSE_HOST at your cluster ClickHouse.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fairq-ingest
+  namespace: fairq
+spec:
+  schedule: "10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ingest
+              image: fairq:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "fairq.ingest"]
+              envFrom:
+                - configMapRef:
+                    name: fairq
+                - secretRef:
+                    name: fairq
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fairq-train-validate
+  namespace: fairq
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: train-validate
+              image: fairq:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sh", "-c", "python -m fairq.train && python -m fairq.validate"]
+              envFrom:
+                - configMapRef:
+                    name: fairq
+                - secretRef:
+                    name: fairq
+              volumeMounts:
+                - name: models
+                  mountPath: /app/models
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1Gi
+                limits:
+                  memory: 2Gi
+          volumes:
+            - name: models
+              persistentVolumeClaim:
+                claimName: fairq-models
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fairq-score
+  namespace: fairq
+spec:
+  schedule: "20 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: score
+              image: fairq:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "fairq.score"]
+              envFrom:
+                - configMapRef:
+                    name: fairq
+                - secretRef:
+                    name: fairq
+              volumeMounts:
+                - name: models
+                  mountPath: /app/models
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 512Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: models
+              persistentVolumeClaim:
+                claimName: fairq-models
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fairq-monitor
+  namespace: fairq
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: monitor
+              image: fairq:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "fairq.monitor"]
+              envFrom:
+                - configMapRef:
+                    name: fairq
+                - secretRef:
+                    name: fairq
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi

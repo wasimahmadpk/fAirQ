@@ -10,7 +10,13 @@ import lightgbm as lgb
 import pandas as pd
 
 from fairq.db import connect
-from fairq.features import FEATURE_COLS, STATION_CODE, feature_vector
+from fairq.features import (
+    FEATURE_COLS,
+    STATION_CODE,
+    feature_vector,
+    is_berlin_holiday,
+    wind_components,
+)
 from fairq.ingest import BERLIN_LAT, BERLIN_LON, BRIGHTSKY, STATIONS, _utc
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
@@ -59,6 +65,9 @@ def fetch_future_weather(start: datetime, hours: int) -> pd.DataFrame:
                 "wind_speed_ms": float(wind_kmh) / 3.6 if wind_kmh is not None else 0.0,
                 "wind_direction_deg": float(item.get("wind_direction") or 0.0),
                 "precipitation_mm": float(item.get("precipitation") or 0.0),
+                "relative_humidity": float(item["relative_humidity"])
+                if item.get("relative_humidity") is not None
+                else 70.0,
             }
         )
     weather = pd.DataFrame(rows).drop_duplicates("observed_at").set_index("observed_at")
@@ -92,16 +101,23 @@ def run() -> None:
                 when = start + timedelta(hours=step - 1)
                 if when in weather.index:
                     last_weather = weather.loc[when]
+                wind_sin, wind_cos = wind_components(
+                    float(last_weather["wind_direction_deg"])
+                )
                 features = pd.DataFrame(
                     [
                         feature_vector(
                             STATION_CODE[station_id],
                             when.hour,
                             when.weekday(),
+                            when.month,
+                            is_berlin_holiday(when.date()),
                             float(last_weather["temperature_c"]),
                             float(last_weather["wind_speed_ms"]),
-                            float(last_weather["wind_direction_deg"]),
+                            wind_sin,
+                            wind_cos,
                             float(last_weather["precipitation_mm"]),
+                            float(last_weather["relative_humidity"]),
                             past,
                         )
                     ],

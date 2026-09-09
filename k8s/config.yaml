@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fairq
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fairq
+  namespace: fairq
+data:
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  MODELS_DIR: /app/models
+  FAIRQ_MIN_ROWS: "2000"
+  FAIRQ_MIN_SKILL_24H: "0"
+  FAIRQ_MAX_MEASUREMENT_AGE_HOURS: "48"
+  FAIRQ_MAX_FORECAST_AGE_HOURS: "36"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fairq
+  namespace: fairq
+type: Opaque
+stringData:
+  CLICKHOUSE_PASSWORD: fairq
