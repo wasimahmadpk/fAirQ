@@ -1,4 +1,4 @@
-"""Write a 4-day hourly forecast using the saved LightGBM models."""
+"""Write a 7-day hourly forecast using the saved LightGBM models."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from fairq.features import FEATURE_COLS, STATION_CODE
 from fairq.ingest import BERLIN_LAT, BERLIN_LON, BRIGHTSKY, STATIONS, _utc
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
-HORIZON_HOURS = 96
+HORIZON_HOURS = 168
 POLLUTANTS = ("NO2", "PM10", "PM2.5")
 
 
