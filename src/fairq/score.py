@@ -10,7 +10,7 @@ import lightgbm as lgb
 import pandas as pd
 
 from fairq.db import connect
-from fairq.features import FEATURE_COLS, STATION_CODE
+from fairq.features import FEATURE_COLS, STATION_CODE, feature_vector
 from fairq.ingest import BERLIN_LAT, BERLIN_LON, BRIGHTSKY, STATIONS, _utc
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
@@ -93,17 +93,18 @@ def run() -> None:
                 if when in weather.index:
                     last_weather = weather.loc[when]
                 features = pd.DataFrame(
-                    [[
-                        STATION_CODE[station_id],
-                        when.hour,
-                        when.weekday(),
-                        float(last_weather["temperature_c"]),
-                        float(last_weather["wind_speed_ms"]),
-                        float(last_weather["wind_direction_deg"]),
-                        float(last_weather["precipitation_mm"]),
-                        past[-1],
-                        past[-24],
-                    ]],
+                    [
+                        feature_vector(
+                            STATION_CODE[station_id],
+                            when.hour,
+                            when.weekday(),
+                            float(last_weather["temperature_c"]),
+                            float(last_weather["wind_speed_ms"]),
+                            float(last_weather["wind_direction_deg"]),
+                            float(last_weather["precipitation_mm"]),
+                            past,
+                        )
+                    ],
                     columns=FEATURE_COLS,
                 )
                 pred = float(models[pollutant].predict(features)[0])

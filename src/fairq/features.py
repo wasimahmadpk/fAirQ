@@ -7,6 +7,8 @@ import pandas as pd
 from fairq.db import connect
 
 STATION_CODE = {"mc032": 0, "mc042": 1, "mc174": 2}
+# Same-pollutant lags: recent hours (odd steps up to 12) plus yesterday.
+LAGS = (1, 3, 5, 7, 9, 11, 12, 24)
 FEATURE_COLS = [
     "station_code",
     "hour",
@@ -15,9 +17,30 @@ FEATURE_COLS = [
     "wind_speed_ms",
     "wind_direction_deg",
     "precipitation_mm",
-    "lag_1",
-    "lag_24",
+    *[f"lag_{k}" for k in LAGS],
 ]
+
+
+def feature_vector(
+    station_code: int,
+    hour: int,
+    weekday: int,
+    temperature_c: float,
+    wind_speed_ms: float,
+    wind_direction_deg: float,
+    precipitation_mm: float,
+    past: list[float],
+) -> list[float]:
+    return [
+        station_code,
+        hour,
+        weekday,
+        temperature_c,
+        wind_speed_ms,
+        wind_direction_deg,
+        precipitation_mm,
+        *[past[-k] for k in LAGS],
+    ]
 
 
 def load_frame() -> pd.DataFrame:
@@ -31,8 +54,8 @@ def load_frame() -> pd.DataFrame:
     frame = air.merge(weather, on="observed_at", how="left")
     frame = frame.sort_values(["station_id", "pollutant", "observed_at"])
     group = frame.groupby(["station_id", "pollutant"], sort=False)["value"]
-    frame["lag_1"] = group.shift(1)
-    frame["lag_24"] = group.shift(24)
+    for k in LAGS:
+        frame[f"lag_{k}"] = group.shift(k)
     frame["hour"] = frame["observed_at"].dt.hour
     frame["weekday"] = frame["observed_at"].dt.weekday
     frame["station_code"] = frame["station_id"].map(STATION_CODE)

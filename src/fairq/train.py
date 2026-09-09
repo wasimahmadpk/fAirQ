@@ -10,7 +10,7 @@ import lightgbm as lgb
 import pandas as pd
 
 from fairq.db import connect
-from fairq.features import FEATURE_COLS, load_frame
+from fairq.features import FEATURE_COLS, feature_vector, load_frame
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
 TEST_DAYS = 14
@@ -25,17 +25,18 @@ def walk_mae(model, hist: pd.DataFrame, future: pd.DataFrame) -> dict[int, tuple
     persist_err: dict[int, float] = {}
     for step, row in enumerate(future.itertuples(index=False), start=1):
         features = pd.DataFrame(
-            [[
-                row.station_code,
-                row.hour,
-                row.weekday,
-                row.temperature_c,
-                row.wind_speed_ms,
-                row.wind_direction_deg,
-                row.precipitation_mm,
-                past[-1],
-                past[-24],
-            ]],
+            [
+                feature_vector(
+                    row.station_code,
+                    row.hour,
+                    row.weekday,
+                    row.temperature_c,
+                    row.wind_speed_ms,
+                    row.wind_direction_deg,
+                    row.precipitation_mm,
+                    past,
+                )
+            ],
             columns=FEATURE_COLS,
         )
         pred = float(model.predict(features)[0])
