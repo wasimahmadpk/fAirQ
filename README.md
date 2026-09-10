@@ -13,15 +13,22 @@ docker compose run --rm api python -m fairq.train
 docker compose run --rm api python -m fairq.validate
 docker compose run --rm api python -m fairq.score
 docker compose run --rm api python -m fairq.monitor
+docker compose run --rm api python -m fairq.cdmi
 curl http://localhost:8000/health
 curl http://localhost:8000/ready
 curl http://localhost:8000/status
 curl "http://localhost:8000/forecast?station_id=mc174&pollutant=NO2"
+curl http://localhost:8000/graph
+open http://localhost:8000/graph/view
+docker compose run --rm api python -m fairq.plot_graph
+curl "http://localhost:8000/simulate?traffic_scale=0.8"
 ```
 
 Ingest pulls **12 months** of hourly **NO₂, PM10, PM2.5** from three Berlin stations plus DWD weather. Train fits a 1h model and direct 24h / 96h / 168h models (last 14 days held out) and records skill vs persist. Validate checks row counts, last-window skill, and a **second 14-day holdout**. Score writes a 7-day hourly forecast. Monitor fails if measurements or forecasts are stale.
 
 `GET /health` is process liveness. `GET /ready` needs ClickHouse plus measurements and forecasts. `GET /status` returns the latest model metrics and `pipeline_runs`.
+
+`python -m fairq.cdmi` is a **light CDMI** (same idea as the DeepAR+knockoff paper, not that codebase): six hourly series, a small LSTM DeepAR-style forecaster (Gaussian NLL), Gaussian knockoffs, KS on residuals. Accepted edges go to `causal_edges`. `GET /graph` returns the weighted graph. `GET /simulate?traffic_scale=0.8` is `do(traffic := 0.8 × traffic)` on street NO₂. `traffic` is a calendar proxy, not vehicle counts.
 
 ## Kubernetes (minikube)
 
@@ -61,6 +68,7 @@ src/fairq/train.py     LightGBM
 src/fairq/validate.py  data contracts + second holdout
 src/fairq/score.py     7-day forecast
 src/fairq/monitor.py   freshness checks
+src/fairq/cdmi.py      light causal graph + simulate
 src/fairq/db.py        ClickHouse client
 k8s/                   API Deployment + CronJobs
 ```

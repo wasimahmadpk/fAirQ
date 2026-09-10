@@ -25,6 +25,7 @@ services:
       CLICKHOUSE_PASSWORD: fairq
       MODELS_DIR: /app/models
     volumes:
+      - ./src:/app/src
       - models-data:/app/models
     depends_on:
       clickhouse:

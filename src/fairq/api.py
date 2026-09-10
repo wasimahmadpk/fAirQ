@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 
+from fairq.cdmi import latest_graph, simulate
 from fairq.db import connect
+from fairq.plot_graph import graph_html
 
-app = FastAPI(title="fAirQ", version="0.3.0")
+app = FastAPI(title="fAirQ", version="0.4.0")
 
 
 @app.get("/health")
@@ -67,6 +69,37 @@ def status() -> dict:
             for job, last_run, last_ok in runs
         ],
     }
+
+
+@app.get("/graph")
+def graph() -> dict:
+    db = connect()
+    payload = latest_graph(db)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="no causal graph; run python -m fairq.cdmi")
+    return payload
+
+
+@app.get("/graph/view", response_class=HTMLResponse)
+def graph_view() -> str:
+    db = connect()
+    payload = latest_graph(db)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="no causal graph; run python -m fairq.cdmi")
+    return graph_html(payload)
+
+
+@app.get("/simulate")
+def simulate_traffic(
+    traffic_scale: float = Query(default=0.8, gt=0, le=2),
+    hours: int = Query(default=24, ge=6, le=168),
+) -> dict:
+    try:
+        return simulate(traffic_scale=traffic_scale, hours=hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/forecast")

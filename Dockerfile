@@ -5,7 +5,8 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 COPY src ./src
 
 ENV PYTHONPATH=/app/src

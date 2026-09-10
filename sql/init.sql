@@ -53,3 +53,28 @@ CREATE TABLE IF NOT EXISTS fairq.pipeline_runs
 )
 ENGINE = MergeTree
 ORDER BY (job, ran_at);
+
+CREATE TABLE IF NOT EXISTS fairq.causal_edges
+(
+    model_version String,
+    trained_at DateTime,
+    cause String,
+    effect String,
+    ks_stat Float64,
+    p_value Float64,
+    rel_mae Float64,
+    accepted UInt8
+)
+ENGINE = MergeTree
+ORDER BY (effect, cause, trained_at);
+
+CREATE TABLE IF NOT EXISTS fairq.causal_graphs
+(
+    model_version String,
+    trained_at DateTime,
+    nodes String,
+    edges String,
+    notes String
+)
+ENGINE = MergeTree
+ORDER BY trained_at;
