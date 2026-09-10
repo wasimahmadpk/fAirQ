@@ -30,6 +30,30 @@ Ingest pulls **12 months** of hourly **NO₂, PM10, PM2.5** from three Berlin st
 
 `python -m fairq.cdmi` is a **light CDMI** (same idea as the DeepAR+knockoff paper, not that codebase): six hourly series, a small LSTM DeepAR-style forecaster (Gaussian NLL), Gaussian knockoffs, KS on residuals. Accepted edges go to `causal_edges`. `GET /graph` returns the weighted graph. `GET /simulate?traffic_scale=0.8` is `do(traffic := 0.8 × traffic)` on street NO₂. `traffic` is a calendar proxy, not vehicle counts.
 
+The **expected** graph (physics / domain, not what CDMI currently draws):
+
+```mermaid
+flowchart TD
+  traffic[Traffic]
+  temp[Temp]
+  humidity[Humidity]
+  wind[Wind]
+  street[Street NO2]
+  forest[Forest NO2]
+
+  traffic --> street
+  wind --> street
+  wind --> forest
+  temp --> street
+  temp --> forest
+  humidity --> street
+  humidity --> forest
+  street --> forest
+  humidity --- temp
+```
+
+Weather (wind, mixing / inversions, humidity) should move both NO₂ sites. Traffic should hit the street canyon first. Street NO₂ can then spill to the forest / background site. Temp and humidity are coupled meteorology, not an intervention. Arrows that should **not** appear: NO₂ → weather, NO₂ → traffic, traffic → temp. The learned graph is denser and often reversed because of shared daily and seasonal clocks; that is the gap to close next.
+
 ## Kubernetes (minikube)
 
 A one-node cluster on this machine. Compose can stay up; use port **18000** for the cluster API so it does not clash with `localhost:8000`.
