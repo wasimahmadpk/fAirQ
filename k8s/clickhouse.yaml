@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fairq-clickhouse
+  namespace: fairq
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fairq-clickhouse-init
+  namespace: fairq
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS fairq;
+
+    CREATE TABLE IF NOT EXISTS fairq.measurements
+    (
+        station_id String,
+        observed_at DateTime,
+        pollutant String,
+        value Float64
+    )
+    ENGINE = MergeTree
+    ORDER BY (station_id, pollutant, observed_at);
+
+    CREATE TABLE IF NOT EXISTS fairq.weather
+    (
+        observed_at DateTime,
+        temperature_c Float64,
+        wind_speed_ms Float64,
+        wind_direction_deg Float64,
+        precipitation_mm Float64,
+        relative_humidity Float64
+    )
+    ENGINE = MergeTree
+    ORDER BY observed_at;
+
+    CREATE TABLE IF NOT EXISTS fairq.forecasts
+    (
+        station_id String,
+        forecast_at DateTime,
+        horizon_hours UInt16,
+        pollutant String,
+        value Float64,
+        model_version String
+    )
+    ENGINE = MergeTree
+    ORDER BY (station_id, pollutant, forecast_at, horizon_hours);
+
+    CREATE TABLE IF NOT EXISTS fairq.model_versions
+    (
+        model_version String,
+        pollutant String,
+        trained_at DateTime,
+        metrics String
+    )
+    ENGINE = MergeTree
+    ORDER BY (pollutant, trained_at);
+
+    CREATE TABLE IF NOT EXISTS fairq.pipeline_runs
+    (
+        ran_at DateTime,
+        job String,
+        ok UInt8,
+        detail String
+    )
+    ENGINE = MergeTree
+    ORDER BY (job, ran_at);
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clickhouse
+  namespace: fairq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:24.8
+          ports:
+            - containerPort: 8123
+          env:
+            - name: CLICKHOUSE_DB
+              value: fairq
+            - name: CLICKHOUSE_USER
+              value: default
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fairq
+                  key: CLICKHOUSE_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: fairq-clickhouse
+        - name: init
+          configMap:
+            name: fairq-clickhouse-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: fairq
+spec:
+  selector:
+    app: clickhouse
+  ports:
+    - port: 8123
+      targetPort: 8123

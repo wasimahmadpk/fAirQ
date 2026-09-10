@@ -23,13 +23,26 @@ Ingest pulls **12 months** of hourly **NO₂, PM10, PM2.5** from three Berlin st
 
 `GET /health` is process liveness. `GET /ready` needs ClickHouse plus measurements and forecasts. `GET /status` returns the latest model metrics and `pipeline_runs`.
 
-## Kubernetes
+## Kubernetes (minikube)
+
+A one-node cluster on this machine. Compose can stay up; use port **18000** for the cluster API so it does not clash with `localhost:8000`.
 
 ```bash
+minikube start --driver=docker --memory=4096 --cpus=2
+docker build -t fairq:latest .
+minikube image load fairq:latest
 kubectl apply -f k8s/
+kubectl -n fairq get pods,cronjobs
+kubectl -n fairq port-forward deploy/fairq-api 18000:8000
+curl http://127.0.0.1:18000/health
 ```
 
-CronJobs: ingest hourly, train+validate daily at 03:00 UTC, score hourly, monitor every 15 minutes. Set `CLICKHOUSE_HOST` in `k8s/config.yaml` to your ClickHouse service. Build and load `fairq:latest` into the cluster before the jobs run.
+`/ready` stays 503 until ingest+score have filled the **in-cluster** ClickHouse (empty on first boot; not the Compose database). CronJobs: ingest hourly, train+validate daily at 03:00 UTC, score hourly, monitor every 15 minutes.
+
+```bash
+minikube stop    # keep the cluster, free Docker RAM
+minikube delete  # wipe it
+```
 
 ## Tests
 
