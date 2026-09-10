@@ -1,7 +1,16 @@
-"""Lightweight CDMI: Tiny-DeepAR + Gaussian knockoffs, then a traffic do-query.
+"""Lightweight CDMI: Tiny-DeepAR + several knockoffs, then a traffic do-query.
 
 Same invariance idea as https://github.com/wasimahmadpk/cdmi, without GluonTS
 or DeepKnockoffs. The forecaster is a small LSTM with Gaussian NLL (DeepAR-like).
+
+Knockoffs (applied one cause column at a time):
+  mean_noise  — replace X with its mean plus a little Gaussian jitter
+  uniform     — replace X with Unif(min X, max X), i.i.d. in time
+  gaussian    — second-order knockoffs (kept as a comparison; often too meek)
+
+KS compares the *full* residual CDFs (location, scale, and shape), not the
+mean alone. Acceptance is driven by forecast MAE under mean_noise, with
+uniform having to agree, plus a few physics bans (NO2 does not set weather).
 """
 
 from __future__ import annotations
@@ -17,6 +26,8 @@ from fairq.db import connect
 from fairq.features import is_berlin_holiday
 
 NODES = ("no2_street", "no2_bg", "temp", "wind", "humidity", "traffic")
+WEATHER = frozenset({"temp", "wind", "humidity"})
+POLLUTANTS = frozenset({"no2_street", "no2_bg"})
 STREET = "mc174"
 BACKGROUND = "mc032"
 TEST_DAYS = 14
@@ -27,15 +38,52 @@ BATCH = 256
 KS_P_MAX = float(os.environ.get("FAIRQ_CDMI_P_MAX", "0.10"))
 KS_STAT_MIN = float(os.environ.get("FAIRQ_CDMI_KS_MIN", "0.03"))
 REL_MAE_MIN = float(os.environ.get("FAIRQ_CDMI_REL_MAE", "0.015"))
+UNIFORM_AGREE = float(os.environ.get("FAIRQ_CDMI_UNIFORM_AGREE", "0.5"))
+MEAN_NOISE_FRAC = float(os.environ.get("FAIRQ_CDMI_MEAN_NOISE", "0.05"))
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
 STREET_MODEL = os.path.join(MODELS_DIR, "cdmi_no2_street.pt")
 
 
-def accept_edge(ks_stat: float, p_value: float, rel_mae: float) -> bool:
-    """Keep only links that also hurt the forecast. KS or p-value is not enough alone."""
-    if rel_mae < REL_MAE_MIN:
+def allowed_pair(cause: str, effect: str) -> bool:
+    """Drop arrows that cannot be physical on this node set."""
+    if cause == effect:
         return False
-    return p_value < KS_P_MAX or ks_stat >= KS_STAT_MIN
+    if effect == "traffic":
+        return False
+    if cause in POLLUTANTS and effect in WEATHER:
+        return False
+    if cause == "traffic" and effect in WEATHER:
+        return False
+    if cause in WEATHER and effect in WEATHER and {cause, effect} != {"temp", "humidity"}:
+        return False
+    return True
+
+
+def accept_edge(
+    cause: str,
+    effect: str,
+    rel_mae_mean: float,
+    rel_mae_uniform: float,
+    ks_stat: float = 0.0,
+    p_value: float = 1.0,
+    rel_std: float = 0.0,
+    rel_mae_gaussian: float = 0.0,
+) -> bool:
+    """MAE is the location/accuracy test; KS/rel_std say the residual law moved.
+
+    Mean+noise asks “does the level of X matter?”. Gaussian+uniform together ask
+    “does the path of X matter?” — useful when the mean is already a decent
+    stand-in (wind) but scrambling the series still hurts.
+    """
+    if not allowed_pair(cause, effect):
+        return False
+    level_ok = rel_mae_mean >= REL_MAE_MIN and rel_mae_uniform >= REL_MAE_MIN * UNIFORM_AGREE
+    path_ok = rel_mae_gaussian >= REL_MAE_MIN and rel_mae_uniform >= REL_MAE_MIN
+    if not (level_ok or path_ok):
+        return False
+    if rel_mae_mean >= 2.0 * REL_MAE_MIN or rel_mae_gaussian >= 2.0 * REL_MAE_MIN:
+        return True
+    return p_value < KS_P_MAX or ks_stat >= KS_STAT_MIN or rel_std >= 0.03
 
 
 def traffic_proxy(hour: int, weekday: int, holiday: int) -> float:
@@ -96,6 +144,50 @@ def gaussian_knockoffs(values: np.ndarray, rng: np.random.Generator) -> np.ndarr
     mapped = standard @ (np.eye(n_cols) - precision @ shrink).T
     knock = mapped + rng.standard_normal((n_rows, n_cols)) @ sqrt_gram
     return knock * scale + center
+
+
+def mean_noise_knockoffs(
+    values: np.ndarray, rng: np.random.Generator, noise_frac: float = MEAN_NOISE_FRAC
+) -> np.ndarray:
+    """do(X := E[X] + ε). Drops all real variation; ε is a small live jitter."""
+    center = values.mean(axis=0)
+    scale = values.std(axis=0, ddof=1)
+    scale = np.where(scale < 1e-8, 1.0, scale)
+    return center + rng.standard_normal(values.shape) * (noise_frac * scale)
+
+
+def uniform_knockoffs(values: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Replace each X_t with Unif(min X, max X), independent in time."""
+    lo = values.min(axis=0)
+    hi = values.max(axis=0)
+    span = np.where(hi <= lo, 1.0, hi - lo)
+    return lo + rng.random(values.shape) * span
+
+
+def studentize(values: np.ndarray) -> np.ndarray:
+    """Strip mean and variance so KS can see leftover shape only."""
+    series = np.asarray(values, dtype=float)
+    scale = float(series.std())
+    if scale < 1e-8:
+        return series - series.mean()
+    return (series - series.mean()) / scale
+
+
+def residual_report(obs: np.ndarray, knocked: np.ndarray) -> dict:
+    """Full residual law: KS (CDF), KS after studentizing, Δmean, relative Δstd, MAE."""
+    ks_stat, p_value = ks_2samp(obs, knocked)
+    ks_shape, _p_shape = ks_2samp(studentize(obs), studentize(knocked))
+    std_obs = float(np.std(obs)) or 1.0
+    mae_obs = float(np.mean(np.abs(obs)))
+    mae_k = float(np.mean(np.abs(knocked)))
+    return {
+        "ks_stat": round(ks_stat, 4),
+        "p_value": round(p_value, 4),
+        "ks_shape": round(ks_shape, 4),
+        "delta_mean": round(float(np.mean(knocked) - np.mean(obs)), 4),
+        "rel_std": round((float(np.std(knocked)) - std_obs) / std_obs, 4),
+        "rel_mae": round((mae_k - mae_obs) / mae_obs if mae_obs else 0.0, 4),
+    }
 
 
 def load_system() -> pd.DataFrame:
@@ -207,7 +299,7 @@ def _predict(model, windows: np.ndarray) -> np.ndarray:
 
 def discover(system: pd.DataFrame) -> dict:
     rng = np.random.default_rng(7)
-    cutoff = system["observed_at"].max() - pd.Timedelta(days=int(TEST_DAYS))
+    cutoff = pd.Timestamp(system["observed_at"].max()) - pd.Timedelta(days=TEST_DAYS)
     raw = system[list(NODES)].to_numpy(dtype=float)
     times = system["observed_at"]
     train_mask = times < cutoff
@@ -218,7 +310,12 @@ def discover(system: pd.DataFrame) -> dict:
     test_y = time_of_y >= cutoff
     if int(train_y.sum()) < 400 or int(test_y.sum()) < 80:
         raise RuntimeError("not enough hourly rows for CDMI")
-    knock_scaled = (gaussian_knockoffs(raw, rng) - center) / scale
+    raw_knocks = {
+        "mean_noise": mean_noise_knockoffs(raw, rng),
+        "uniform": uniform_knockoffs(raw, rng),
+        "gaussian": gaussian_knockoffs(raw, rng),
+    }
+    knocks = {name: (values - center) / scale for name, values in raw_knocks.items()}
     edges: list[dict] = []
 
     for effect_i, effect in enumerate(NODES):
@@ -227,7 +324,6 @@ def discover(system: pd.DataFrame) -> dict:
         y_test = targets[test_y.to_numpy(), effect_i]
         pred_obs = _predict(model, x_test)
         residual_obs = y_test - pred_obs
-        mae_obs = float(np.mean(np.abs(residual_obs)))
         if effect == "no2_street":
             os.makedirs(MODELS_DIR, exist_ok=True)
             _torch()[0].save(
@@ -244,29 +340,49 @@ def discover(system: pd.DataFrame) -> dict:
         for cause_i, cause in enumerate(NODES):
             if cause == effect:
                 continue
-            mixed = scaled.copy()
-            mixed[:, cause_i] = knock_scaled[:, cause_i]
-            series_k, _ = _windows(mixed)
-            x_do = series_k[test_y.to_numpy()]
-            residual_k = y_test - _predict(model, x_do)
-            stat, p_value = ks_2samp(residual_obs, residual_k)
-            mae_k = float(np.mean(np.abs(residual_k)))
-            rel_mae = (mae_k - mae_obs) / mae_obs if mae_obs else 0.0
-            accepted = int(accept_edge(stat, p_value, rel_mae))
+            by_kind: dict[str, dict] = {}
+            for name, knock in knocks.items():
+                mixed = scaled.copy()
+                mixed[:, cause_i] = knock[:, cause_i]
+                series_k, _ = _windows(mixed)
+                residual_k = y_test - _predict(model, series_k[test_y.to_numpy()])
+                by_kind[name] = residual_report(residual_obs, residual_k)
+            primary = by_kind["mean_noise"]
+            accepted = int(
+                accept_edge(
+                    cause,
+                    effect,
+                    primary["rel_mae"],
+                    by_kind["uniform"]["rel_mae"],
+                    primary["ks_stat"],
+                    primary["p_value"],
+                    primary["rel_std"],
+                    by_kind["gaussian"]["rel_mae"],
+                )
+            )
             edges.append(
                 {
                     "cause": cause,
                     "effect": effect,
-                    "ks_stat": round(stat, 4),
-                    "p_value": round(p_value, 4),
-                    "rel_mae": round(rel_mae, 4),
+                    "ks_stat": primary["ks_stat"],
+                    "p_value": primary["p_value"],
+                    "ks_shape": primary["ks_shape"],
+                    "delta_mean": primary["delta_mean"],
+                    "rel_std": primary["rel_std"],
+                    "rel_mae": primary["rel_mae"],
+                    "rel_mae_uniform": by_kind["uniform"]["rel_mae"],
+                    "rel_mae_gaussian": by_kind["gaussian"]["rel_mae"],
                     "accepted": accepted,
                 }
             )
             mark = "edge" if accepted else "none"
             print(
                 f"cdmi  {mark:4}  {cause:>12} -> {effect:<12}  "
-                f"KS={stat:.3f}  p={p_value:.3f}  dMAE={rel_mae:+.3f}"
+                f"KS={primary['ks_stat']:.3f}  shape={primary['ks_shape']:.3f}  "
+                f"dμ={primary['delta_mean']:+.3f}  dσ={primary['rel_std']:+.3f}  "
+                f"dMAE μ+ε={primary['rel_mae']:+.3f}  "
+                f"U={by_kind['uniform']['rel_mae']:+.3f}  "
+                f"G={by_kind['gaussian']['rel_mae']:+.3f}"
             )
 
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")
@@ -306,10 +422,12 @@ def persist(result: dict) -> None:
             ],
         )
     note = (
-        "Light CDMI: Tiny-DeepAR (LSTM + Gaussian NLL) + Gaussian knockoffs. "
-        f"Edge if test MAE rises >={REL_MAE_MIN:.1%} and (KS p<{KS_P_MAX} or KS>={KS_STAT_MIN}). "
-        "traffic is a calendar proxy, not vehicle counts. "
-        "Assumes sufficiency and stationarity; hidden regional sources possible."
+        "Light CDMI: Tiny-DeepAR + mean+noise / uniform / Gaussian knockoffs. "
+        "KS compares full residual CDFs (mean, variance, shape); ks_shape is KS "
+        "after studentizing. Accept if mean+noise ΔMAE is large, uniform agrees, "
+        "and the arrow is physically allowed (no NO2→weather, no traffic→weather, "
+        "weather-internal only temp↔humidity). "
+        "traffic is a calendar proxy, not vehicle counts."
     )
     db.insert(
         "causal_graphs",

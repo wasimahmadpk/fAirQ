@@ -76,7 +76,11 @@ def graph_html(graph: dict) -> str:
                 "width": 1.4 + 10 * rel,
                 "label": f"{rel:.2f}",
                 "color": {"color": "#80cbc4", "highlight": "#ffd54f"},
-                "title": f"KS={edge.get('ks_stat')}  ΔMAE={edge.get('rel_mae')}",
+                "title": (
+                    f"KS={edge.get('ks_stat')}  shape={edge.get('ks_shape')}  "
+                    f"ΔMAE μ+ε={edge.get('rel_mae')}  U={edge.get('rel_mae_uniform')}  "
+                    f"G={edge.get('rel_mae_gaussian')}"
+                ),
                 "smooth": {"type": "curvedCW", "roundness": 0.18},
             }
         )
